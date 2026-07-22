@@ -1,6 +1,7 @@
 // Choreo — app shell. Hash routing, four screens, one WebSocket.
 
 import { extractPoses } from './pose.js';
+import { drawStickman } from './stickman.js';
 import { Studio } from './studio.js';
 import { Battle } from './battle.js';
 import { Party } from './party.js';
@@ -75,42 +76,73 @@ async function ensureVideo(url, onStatus) {
   }
 }
 
-async function ensurePoses(id, onProgress) {
+async function ensurePoses(id, ui) {
   const cached = await fetch(`/api/videos/${id}/poses`);
   if (cached.ok) return cached.json();
 
   // Nobody has watched this one yet, so we extract here and hand the result
   // back to the server — the next person gets it instantly.
-  const v = h('video', { src: `/videos/${id}.mp4`, playsinline: true, muted: true, crossorigin: 'anonymous' });
-  v.style.cssText = 'position:fixed;left:-9999px;width:480px';
-  document.body.append(v);
+  //
+  // The element has to stay visible while it plays: browsers pause muted,
+  // video-only playback that they consider backgrounded, which would truncate
+  // the extraction with no error. Showing the work is the honest fix, and it is
+  // the best thirty seconds of the product anyway — you watch the skeleton
+  // assemble itself over the dancer.
+  const v = h('video', { src: `/videos/${id}.mp4`, playsinline: true, muted: true, class: 'peek-video' });
+  const peek = ui.peek(v);
   await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error('Video would not load.')); });
   try {
-    const pose = await extractPoses(v, onProgress);
+    const pose = await extractPoses(v, (p, lm) => {
+      ui.say('Watching the dancer, frame by frame…', 0.3 + p * 0.65);
+      peek.draw(lm);
+    });
     fetch(`/api/videos/${id}/poses`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pose),
     }).catch(() => {});
     return pose;
   } finally {
-    v.remove();
+    peek.remove();
   }
 }
 
 function loadingScreen(title) {
   const label = h('p', { class: 'load-label' }, 'Starting up…');
   const fill = h('i');
+  const figure = h('div', { class: 'load-figure' }, h('span', {}, '🕺'));
   const node = shell(h('div', { class: 'loading' },
-    h('div', { class: 'load-figure' }, h('span', {}, '🕺')),
+    figure,
     h('h1', {}, title),
     label,
     h('div', { class: 'load-bar' }, fill),
-    h('p', { class: 'muted small' }, 'Pose tracking runs on your machine, in this tab. First routine takes a moment; after that it is cached forever.'),
+    h('p', { class: 'muted small' }, 'Pose tracking runs on your machine, in this tab. A routine is read once and then cached for everyone who opens it after you.'),
   ));
   render(node);
+
   return {
     say(text, pct) {
       label.textContent = text;
       if (pct != null) fill.style.width = `${Math.round(pct * 100)}%`;
+    },
+    // Swaps the bobbing emoji for the video being read, with the skeleton drawn
+    // on top as it is found.
+    peek(video) {
+      const canvas = h('canvas', { class: 'peek-canvas' });
+      const box = h('div', { class: 'peek' }, video, canvas);
+      figure.replaceWith(box);
+      const ctx = canvas.getContext('2d');
+      return {
+        draw(lm) {
+          const r = box.getBoundingClientRect();
+          const dpr = Math.min(devicePixelRatio || 1, 2);
+          if (canvas.width !== r.width * dpr) {
+            canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+          }
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, r.width, r.height);
+          if (lm) drawStickman(ctx, lm, { W: r.width, H: r.height, color: '#faf5ec', lineWidth: Math.max(3, r.width * 0.014) });
+        },
+        remove() { box.replaceWith(figure); video.pause(); video.removeAttribute('src'); },
+      };
     },
   };
 }
@@ -125,8 +157,8 @@ async function loadRoutine(id, ui) {
     if (meta) metaCache.set(id, meta);
   }
   if (!meta) throw new Error('That routine is not in the library yet — paste its link on the home screen.');
-  ui?.say('Reading the choreography…', 0.35);
-  const pose = await ensurePoses(id, (p) => ui?.say('Watching the dancer, frame by frame…', 0.35 + p * 0.6));
+  ui.say('Loading the pose model…', 0.25);
+  const pose = await ensurePoses(id, ui);
   return { meta, pose };
 }
 
