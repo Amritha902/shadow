@@ -1,0 +1,15 @@
+{
+  "name": "choreo",
+  "version": "0.1.0",
+  "description": "Learn any dance from a YouTube link — AI stickman choreography breakdown",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.2",
+    "ws": "^8.21.1"
+  }
+}

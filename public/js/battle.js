@@ -1,0 +1,257 @@
+// Battle engine — the reference dancer and you, on the same stage, scored live.
+//
+// Everything here runs at display refresh: the reference stickman is
+// interpolated from cached pose data, your pose comes off the webcam through
+// MediaPipe, and the two are compared bone-direction to bone-direction. The
+// score you see is the score, computed on your device, no round trips.
+
+import { poseAt, drawStickman, comparePoses } from './stickman.js';
+import { createLandmarker } from './pose.js';
+import { h, beep } from './ui.js';
+
+const JUDGEMENTS = [
+  { at: 88, label: 'PERFECT', points: 300, cls: 'perfect' },
+  { at: 72, label: 'GREAT', points: 200, cls: 'great' },
+  { at: 55, label: 'GOOD', points: 100, cls: 'good' },
+  { at: 35, label: 'OFF', points: 25, cls: 'off' },
+  { at: -1, label: 'MISS', points: 0, cls: 'miss' },
+];
+const judge = (s) => JUDGEMENTS.find((j) => s >= j.at);
+
+// Combo multiplier caps at 4x — high enough to make a clean run feel special,
+// low enough that one great streak can't outweigh the whole rest of the song.
+const multiplier = (combo) => Math.min(4, 1 + Math.floor(combo / 8) * 0.5);
+
+export class Battle {
+  /**
+   * @param {object} o
+   * @param {HTMLElement} o.mount        container to render the stage into
+   * @param {Array}  o.frames            cached reference pose frames
+   * @param {string} o.videoUrl          reference video (audio + timing source)
+   * @param {[number,number]} [o.region] [start,end] seconds — defaults to whole clip
+   * @param {boolean} [o.mirror]         mirror the reference (face-to-face teaching)
+   * @param {number} [o.rate]            playback rate
+   */
+  constructor(o) {
+    this.o = { mirror: true, rate: 1, ...o };
+    this.score = 0;
+    this.combo = 0;
+    this.bestCombo = 0;
+    this.samples = [];
+    this.tally = { PERFECT: 0, GREAT: 0, GOOD: 0, OFF: 0, MISS: 0 };
+    this.running = false;
+    this._pops = [];
+    this._smooth = 0;
+    this._lastJudge = 0;
+    this._window = [];
+  }
+
+  async mountUI() {
+    const o = this.o;
+    this.video = h('video', { src: o.videoUrl, playsinline: true, preload: 'auto', class: 'battle-ref-video' });
+    this.cam = h('video', { playsinline: true, muted: true, autoplay: true, class: 'battle-cam-video' });
+    this.canvas = h('canvas', { class: 'battle-canvas' });
+    this.camPip = h('div', { class: 'battle-pip' }, this.cam);
+
+    this.hud = h('div', { class: 'battle-hud' },
+      this.elScore = h('div', { class: 'hud-score' }, '0'),
+      this.elCombo = h('div', { class: 'hud-combo' }),
+      this.elBar = h('div', { class: 'hud-bar' }, this.elBarFill = h('i')),
+    );
+    this.judgeLayer = h('div', { class: 'battle-judge' });
+    this.countIn = h('div', { class: 'battle-countin' });
+    this.stage = h('div', { class: 'battle-stage' },
+      this.canvas, this.camPip, this.hud, this.judgeLayer, this.countIn,
+    );
+    o.mount.append(this.stage);
+
+    const ctx = this.canvas.getContext('2d');
+    this.ctx = ctx;
+    this._resize = () => {
+      const r = this.stage.getBoundingClientRect();
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      this.canvas.width = r.width * dpr;
+      this.canvas.height = r.height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.W = r.width; this.H = r.height;
+    };
+    this._resize();
+    addEventListener('resize', this._resize);
+
+    // Camera first: if it's denied there's no game, and we'd rather say so
+    // before the model download makes the user wait.
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      audio: false,
+    });
+    this.cam.srcObject = this.stream;
+    await this.cam.play();
+    this.landmarker = await createLandmarker();
+    await new Promise((res) => {
+      if (this.video.readyState >= 2) return res();
+      this.video.onloadeddata = res;
+    });
+  }
+
+  /** @param {number} [startAt] wall-clock ms for a synchronised party start */
+  async start(startAt) {
+    const [from] = this.o.region || [0];
+    this.video.currentTime = from;
+    this.video.playbackRate = this.o.rate;
+
+    // Count-in: four beats, drawn big, so nobody is still finding their mark
+    // when the first pose lands.
+    const beats = 4;
+    const gap = startAt ? Math.max(0, startAt - Date.now()) / beats : 700;
+    for (let i = beats; i > 0; i--) {
+      this.countIn.textContent = i === 1 ? 'GO' : String(i - 1 || 1);
+      this.countIn.className = 'battle-countin show';
+      beep(i === 1 ? 1320 : 660, 0.09, 0.16, 'triangle');
+      await new Promise((r) => setTimeout(r, gap));
+      this.countIn.className = 'battle-countin';
+    }
+    this.countIn.textContent = '';
+
+    this.running = true;
+    await this.video.play().catch(() => {});
+    this._loop();
+    this._detect();
+  }
+
+  // Two loops on purpose: drawing must never wait on inference. The renderer
+  // runs every frame; detection runs as fast as the model allows and leaves its
+  // latest result behind for the renderer to pick up.
+  _detect() {
+    const tick = () => {
+      if (!this.running) return;
+      if (this.cam.readyState >= 2) {
+        try {
+          const res = this.landmarker.detectForVideo(this.cam, performance.now());
+          const lm = res.landmarks?.[0];
+          this.userPose = lm ? lm.map((p) => [p.x, p.y, p.z, p.visibility ?? 1]) : null;
+        } catch { /* transient GPU hiccup; next frame will do */ }
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  _loop() {
+    const o = this.o;
+    const [, to] = o.region || [0, Infinity];
+
+    const frame = () => {
+      if (!this.running) return;
+      const t = this.video.currentTime;
+      if (t >= to || this.video.ended) { this.stop(); this.o.onEnd?.(this.result()); return; }
+
+      const ref = poseAt(o.frames, t);
+      const ctx = this.ctx;
+      ctx.clearRect(0, 0, this.W, this.H);
+
+      // The reference is the anchor: solid ink, centre stage.
+      drawStickman(ctx, ref, {
+        W: this.W, H: this.H, mirror: o.mirror,
+        color: getCSS('--ink'), lineWidth: Math.max(5, this.W * 0.012),
+      });
+
+      // You, ghosted over the top in the accent, so a mismatch reads instantly
+      // as two lines that don't overlap.
+      let cmp = null;
+      if (this.userPose) {
+        cmp = comparePoses(ref, this.userPose, { mirrorUser: !o.mirror });
+        const hot = cmp && cmp.score >= 72;
+        drawStickman(ctx, this.userPose, {
+          W: this.W, H: this.H, mirror: !o.mirror,
+          color: hot ? getCSS('--good') : getCSS('--accent'),
+          glow: hot ? getCSS('--good') : null,
+          alpha: 0.9, ghost: true,
+          lineWidth: Math.max(4, this.W * 0.009),
+        });
+      }
+
+      if (cmp) this._accumulate(cmp, t);
+      this._drawPops(ctx);
+      this._paintHud(cmp);
+      requestAnimationFrame(frame);
+    };
+    frame();
+  }
+
+  // Scoring happens on a beat-ish cadence, not per frame: judging 60 times a
+  // second would be unreadable and would punish a single blurry frame.
+  _accumulate(cmp, t) {
+    this._window.push(cmp.score);
+    this._smooth = this._smooth * 0.85 + cmp.score * 0.15;
+    if (t - this._lastJudge < 0.45) return;
+    this._lastJudge = t;
+
+    const avg = this._window.reduce((a, b) => a + b, 0) / this._window.length;
+    this._window.length = 0;
+    this.samples.push(avg);
+
+    const j = judge(avg);
+    this.tally[j.label]++;
+    if (j.points > 25) {
+      this.combo++;
+      this.bestCombo = Math.max(this.bestCombo, this.combo);
+    } else {
+      this.combo = 0;
+    }
+    this.score += Math.round(j.points * multiplier(this.combo));
+    this._pop(j, cmp.worst);
+    if (j.label === 'PERFECT') beep(1180, 0.05, 0.07, 'triangle');
+    else if (j.label === 'MISS') beep(180, 0.09, 0.05, 'sawtooth');
+    this.o.onTick?.({ score: this.score, combo: this.combo, judgement: j.label, worst: cmp.worst });
+  }
+
+  _pop(j, worst) {
+    const el = h('div', { class: `judge ${j.cls}` },
+      h('b', {}, j.label),
+      j.label === 'MISS' || j.label === 'OFF' ? h('small', {}, worst ? `check your ${worst.name}` : '') : null,
+      this.combo > 3 ? h('em', {}, `${this.combo}×`) : null,
+    );
+    this.judgeLayer.append(el);
+    requestAnimationFrame(() => el.classList.add('in'));
+    setTimeout(() => el.remove(), 900);
+  }
+
+  _drawPops() { /* judgements are DOM; kept as a hook for canvas-side FX */ }
+
+  _paintHud(cmp) {
+    this.elScore.textContent = this.score.toLocaleString();
+    const m = multiplier(this.combo);
+    this.elCombo.textContent = this.combo > 2 ? `${this.combo} combo · ${m}×` : '';
+    this.elCombo.className = `hud-combo${this.combo > 7 ? ' hot' : ''}`;
+    const pct = Math.max(0, Math.min(100, cmp ? this._smooth : 0));
+    this.elBarFill.style.width = `${pct}%`;
+    this.elBarFill.style.background = pct > 72 ? getCSS('--good') : pct > 45 ? getCSS('--warn') : getCSS('--accent');
+  }
+
+  result() {
+    const acc = this.samples.length
+      ? this.samples.reduce((a, b) => a + b, 0) / this.samples.length
+      : 0;
+    const rank = acc >= 85 ? 'S' : acc >= 75 ? 'A' : acc >= 62 ? 'B' : acc >= 45 ? 'C' : 'D';
+    return {
+      score: this.score, accuracy: Math.round(acc), bestCombo: this.bestCombo,
+      tally: { ...this.tally }, rank,
+    };
+  }
+
+  stop() {
+    this.running = false;
+    try { this.video.pause(); } catch { /* already gone */ }
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.landmarker?.close();
+    removeEventListener('resize', this._resize);
+  }
+}
+
+const cssCache = new Map();
+function getCSS(name) {
+  if (!cssCache.has(name)) {
+    cssCache.set(name, getComputedStyle(document.documentElement).getPropertyValue(name).trim());
+  }
+  return cssCache.get(name);
+}
