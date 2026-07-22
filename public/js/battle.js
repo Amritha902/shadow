@@ -155,21 +155,25 @@ export class Battle {
       const ctx = this.ctx;
       ctx.clearRect(0, 0, this.W, this.H);
 
-      // The reference is the anchor: pale on the dark stage, centre frame.
+      // The dancer is shown exactly as filmed, and you are shown as a mirror
+      // would show you. Copying face-to-face means answering their left arm
+      // with your right, and those two land on the same side of the screen —
+      // so the figures overlap when you have it right, which is the whole game.
       drawStickman(ctx, ref, {
-        W: this.W, H: this.H, mirror: o.mirror, fit: this.refBounds, aspect: o.aspect,
+        W: this.W, H: this.H, fit: this.refBounds, aspect: o.aspect,
         color: '#fdf6e9', alpha: 0.5, lineWidth: Math.max(5, this.W * 0.014),
       });
 
-      // You, drawn over the top in the accent, so a mismatch reads instantly as
-      // two figures that don't line up.
       let cmp = null;
       if (this.userPose) {
-        cmp = comparePoses(ref, this.userPose, { mirrorUser: !o.mirror });
+        // Score against the reflection, not the original: reflecting swaps the
+        // sides of the body, which flipping x alone does not, and without it
+        // every mirrored limb would read as the wrong limb.
+        cmp = comparePoses(o.mirror ? mirrorPose(ref) : ref, this.userPose);
         const hot = cmp && cmp.score >= 72;
         this.userBounds = easeBounds(this.userBounds, poseBounds(this.userPose), 0.12);
         drawStickman(ctx, this.userPose, {
-          W: this.W, H: this.H, mirror: !o.mirror,
+          W: this.W, H: this.H, mirror: o.mirror,
           fit: this.userBounds, aspect: this.camAspect,
           color: hot ? getCSS('--good') : getCSS('--accent'),
           glow: hot ? getCSS('--good') : getCSS('--accent'),

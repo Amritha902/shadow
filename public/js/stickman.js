@@ -62,16 +62,25 @@ export function poseBounds(lm) {
 
 // One box for the whole routine. Per-frame boxes would make the figure breathe
 // as limbs extend; a fixed frame keeps it planted like a real dancer.
-export function framesBounds(frames) {
-  let x0 = 1, y0 = 1, x1 = 0, y1 = 0, n = 0;
+//
+// Taken at a percentile rather than the extremes: the tracker guesses at
+// landmarks that leave the frame, and a single wild guess in one frame would
+// otherwise shrink the dancer for the entire routine.
+const pick = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * q)))];
+
+export function framesBounds(frames, q = 0.02) {
+  const x0 = [], y0 = [], x1 = [], y1 = [];
   for (const f of frames) {
     const b = poseBounds(f.lm);
     if (!b) continue;
-    x0 = Math.min(x0, b.x0); x1 = Math.max(x1, b.x1);
-    y0 = Math.min(y0, b.y0); y1 = Math.max(y1, b.y1);
-    n++;
+    x0.push(b.x0); y0.push(b.y0); x1.push(b.x1); y1.push(b.y1);
   }
-  return n ? { x0, y0, x1, y1 } : null;
+  if (!x0.length) return null;
+  for (const a of [x0, y0, x1, y1]) a.sort((m, n) => m - n);
+  return {
+    x0: pick(x0, q), y0: pick(y0, q),
+    x1: pick(x1, 1 - q), y1: pick(y1, 1 - q),
+  };
 }
 
 // Blend a box toward a target — used for live poses, where an unsmoothed box
@@ -208,6 +217,28 @@ export function segmentSteps(frames, duration, { maxSteps = 12, minLen = 1.2 } =
   return steps.map((s, i) => ({ label: `Step ${i + 1}`, ...s }));
 }
 
+// ---------- mirroring ----------
+// Every left/right landmark pair. Flipping x alone is not a mirror: it moves
+// the dancer's left arm across the frame but leaves it labelled "left", so a
+// learner copying face-to-face — who answers a left arm with their right —
+// scores as if they had used the wrong limb entirely.
+const MIRROR_PAIRS = [
+  [1, 4], [2, 5], [3, 6], [7, 8], [9, 10],
+  [11, 12], [13, 14], [15, 16], [17, 18], [19, 20], [21, 22],
+  [23, 24], [25, 26], [27, 28], [29, 30], [31, 32],
+];
+
+// A true mirror image of a pose: x reflected, and the two sides of the body
+// exchanged. What the learner sees is then what the learner should do.
+export function mirrorPose(lm) {
+  if (!lm) return null;
+  const out = lm.map((p) => [1 - p[0], p[1], p[2], p[3]]);
+  for (const [a, b] of MIRROR_PAIRS) {
+    const t = out[a]; out[a] = out[b]; out[b] = t;
+  }
+  return out;
+}
+
 // ---------- pose comparison (practice mode) ----------
 const LIMBS = [
   { name: 'left arm', pairs: [[LM.leftShoulder, LM.leftElbow], [LM.leftElbow, LM.leftWrist]] },
@@ -217,25 +248,24 @@ const LIMBS = [
   { name: 'torso', pairs: [[LM.leftShoulder, LM.leftHip], [LM.rightShoulder, LM.rightHip], [LM.leftShoulder, LM.rightShoulder]] },
 ];
 
-function limbVec(lm, a, b, mirror) {
-  const ax = mirror ? 1 - lm[a][0] : lm[a][0];
-  const bx = mirror ? 1 - lm[b][0] : lm[b][0];
-  const dx = bx - ax, dy = lm[b][1] - lm[a][1];
+function limbVec(lm, a, b) {
+  const dx = lm[b][0] - lm[a][0], dy = lm[b][1] - lm[a][1];
   const n = Math.hypot(dx, dy) || 1;
   return [dx / n, dy / n];
 }
 
-// Compares bone *directions* (scale/position invariant). mirrorUser flips the
-// user's pose so facing a webcam feels like dancing in front of a mirror.
-export function comparePoses(refLm, userLm, { mirrorUser = true } = {}) {
+// Compares bone *directions*, so it is blind to where in frame you are and how
+// big you look. Both poses must already be in the same handedness — mirror the
+// reference with mirrorPose() first if the dancer is being copied face-to-face.
+export function comparePoses(refLm, userLm) {
   if (!refLm || !userLm) return null;
   const limbScores = [];
   for (const limb of LIMBS) {
     let sum = 0, n = 0;
     for (const [a, b] of limb.pairs) {
       if (refLm[a][3] < 0.35 || refLm[b][3] < 0.35 || userLm[a][3] < 0.35 || userLm[b][3] < 0.35) continue;
-      const [rx, ry] = limbVec(refLm, a, b, false);
-      const [ux, uy] = limbVec(userLm, a, b, mirrorUser);
+      const [rx, ry] = limbVec(refLm, a, b);
+      const [ux, uy] = limbVec(userLm, a, b);
       sum += (rx * ux + ry * uy + 1) / 2; // cosine → 0..1
       n++;
     }
