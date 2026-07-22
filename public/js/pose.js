@@ -97,5 +97,10 @@ export async function extractPoses(video, onProgress) {
   }
 
   if (frames.length < 2) throw new Error('No dancer was visible in that video.');
-  return { version: 1, duration, frames };
+  // Landmarks are normalised per axis, so the source aspect has to travel with
+  // them or the stickman comes out stretched.
+  const aspect = video.videoWidth && video.videoHeight
+    ? video.videoWidth / video.videoHeight
+    : 16 / 9;
+  return { version: 2, duration, aspect, frames };
 }

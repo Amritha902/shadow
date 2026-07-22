@@ -5,13 +5,15 @@
 // your body is supposed to make. Loop the hook, halve the speed, mirror it so
 // left stays left, and drill.
 
-import { poseAt, drawStickman, segmentSteps } from './stickman.js';
+import { poseAt, drawStickman, segmentSteps, framesBounds } from './stickman.js';
 import { findHook, estimateTempo } from './hook.js';
 import { h, clear, fmtTime, store, toast } from './ui.js';
 
 export function Studio({ meta, pose, onBattle, onOpen }) {
   const frames = pose.frames;
   const duration = pose.duration || meta.duration;
+  const aspect = pose.aspect || 16 / 9;
+  const bounds = framesBounds(frames);
 
   const { hook, loops } = findHook(frames, duration);
   const bpm = estimateTempo(frames, duration);
@@ -172,9 +174,9 @@ export function Studio({ meta, pose, onBattle, onOpen }) {
     if (looping && t >= region[1] - 0.03) video.currentTime = region[0];
     ctx.clearRect(0, 0, canvas._w, canvas._h);
     drawStickman(ctx, poseAt(frames, t), {
-      W: canvas._w, H: canvas._h, mirror,
+      W: canvas._w, H: canvas._h, mirror, fit: bounds, aspect,
       color: getComputedStyle(document.documentElement).getPropertyValue('--ink').trim(),
-      lineWidth: Math.max(5, canvas._w * 0.014),
+      lineWidth: Math.max(5, canvas._w * 0.016),
     });
     video.style.transform = mirror ? 'scaleX(-1)' : '';
     headEl.style.left = `${(t / duration) * 100}%`;

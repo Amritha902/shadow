@@ -5,7 +5,7 @@
 // MediaPipe, and the two are compared bone-direction to bone-direction. The
 // score you see is the score, computed on your device, no round trips.
 
-import { poseAt, drawStickman, comparePoses } from './stickman.js';
+import { poseAt, drawStickman, comparePoses, framesBounds, poseBounds, easeBounds } from './stickman.js';
 import { createLandmarker } from './pose.js';
 import { h, beep } from './ui.js';
 
@@ -33,7 +33,12 @@ export class Battle {
    * @param {number} [o.rate]            playback rate
    */
   constructor(o) {
-    this.o = { mirror: true, rate: 1, ...o };
+    this.o = { mirror: true, rate: 1, aspect: 16 / 9, ...o };
+    // Each dancer is drawn to fill the same box, so someone standing across the
+    // room overlays the reference exactly as well as someone up close. The
+    // score already ignores scale; now the picture agrees with it.
+    this.refBounds = framesBounds(this.o.frames);
+    this.userBounds = null;
     this.score = 0;
     this.combo = 0;
     this.bestCombo = 0;
@@ -86,6 +91,7 @@ export class Battle {
     });
     this.cam.srcObject = this.stream;
     await this.cam.play();
+    this.camAspect = (this.cam.videoWidth / this.cam.videoHeight) || 4 / 3;
     this.landmarker = await createLandmarker();
     await new Promise((res) => {
       if (this.video.readyState >= 2) return res();
@@ -149,24 +155,25 @@ export class Battle {
       const ctx = this.ctx;
       ctx.clearRect(0, 0, this.W, this.H);
 
-      // The reference is the anchor: solid ink, centre stage.
+      // The reference is the anchor: pale on the dark stage, centre frame.
       drawStickman(ctx, ref, {
-        W: this.W, H: this.H, mirror: o.mirror,
-        color: getCSS('--ink'), lineWidth: Math.max(5, this.W * 0.012),
+        W: this.W, H: this.H, mirror: o.mirror, fit: this.refBounds, aspect: o.aspect,
+        color: '#fdf6e9', alpha: 0.5, lineWidth: Math.max(5, this.W * 0.014),
       });
 
-      // You, ghosted over the top in the accent, so a mismatch reads instantly
-      // as two lines that don't overlap.
+      // You, drawn over the top in the accent, so a mismatch reads instantly as
+      // two figures that don't line up.
       let cmp = null;
       if (this.userPose) {
         cmp = comparePoses(ref, this.userPose, { mirrorUser: !o.mirror });
         const hot = cmp && cmp.score >= 72;
+        this.userBounds = easeBounds(this.userBounds, poseBounds(this.userPose), 0.12);
         drawStickman(ctx, this.userPose, {
           W: this.W, H: this.H, mirror: !o.mirror,
+          fit: this.userBounds, aspect: this.camAspect,
           color: hot ? getCSS('--good') : getCSS('--accent'),
-          glow: hot ? getCSS('--good') : null,
-          alpha: 0.9, ghost: true,
-          lineWidth: Math.max(4, this.W * 0.009),
+          glow: hot ? getCSS('--good') : getCSS('--accent'),
+          lineWidth: Math.max(4, this.W * 0.011),
         });
       }
 

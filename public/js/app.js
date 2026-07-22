@@ -336,6 +336,7 @@ async function viewBattle(id, { partyMode = false, startAt = 0 } = {}) {
 
   const b = new Battle({
     mount: stage, frames: pose.frames, videoUrl: `/videos/${id}.mp4`, region, mirror: true,
+    aspect: pose.aspect || 16 / 9,
     onTick: ({ score, combo }) => { if (partyMode) party.tick(score, combo); },
     onEnd: (result) => finishBattle(id, meta, result, partyMode),
   });

@@ -41,17 +41,83 @@ export function poseAt(frames, t) {
   });
 }
 
+// ---------- framing ----------
+// Landmarks are normalised to the source frame, so a dancer shot wide comes out
+// as a thumbnail in the corner. Fitting to the figure's own bounds makes the
+// stickman fill the pane — and, in a battle, makes you and the reference the
+// same size no matter how far either of you stood from the lens.
+
+const VISIBLE = 0.35;
+
+export function poseBounds(lm) {
+  let x0 = 1, y0 = 1, x1 = 0, y1 = 0, n = 0;
+  for (const p of lm) {
+    if (p[3] <= VISIBLE) continue;
+    x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]);
+    y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]);
+    n++;
+  }
+  return n >= 4 ? { x0, y0, x1, y1 } : null;
+}
+
+// One box for the whole routine. Per-frame boxes would make the figure breathe
+// as limbs extend; a fixed frame keeps it planted like a real dancer.
+export function framesBounds(frames) {
+  let x0 = 1, y0 = 1, x1 = 0, y1 = 0, n = 0;
+  for (const f of frames) {
+    const b = poseBounds(f.lm);
+    if (!b) continue;
+    x0 = Math.min(x0, b.x0); x1 = Math.max(x1, b.x1);
+    y0 = Math.min(y0, b.y0); y1 = Math.max(y1, b.y1);
+    n++;
+  }
+  return n ? { x0, y0, x1, y1 } : null;
+}
+
+// Blend a box toward a target — used for live poses, where an unsmoothed box
+// would jitter the whole figure every frame.
+export function easeBounds(current, target, k = 0.08) {
+  if (!target) return current;
+  if (!current) return { ...target };
+  return {
+    x0: current.x0 + (target.x0 - current.x0) * k,
+    y0: current.y0 + (target.y0 - current.y0) * k,
+    x1: current.x1 + (target.x1 - current.x1) * k,
+    y1: current.y1 + (target.y1 - current.y1) * k,
+  };
+}
+
 // ---------- drawing ----------
 export function drawStickman(ctx, lm, opts = {}) {
   const {
     W = ctx.canvas.width, H = ctx.canvas.height,
     mirror = false, color = '#201b16', glow = null, lineWidth = null,
-    alpha = 1, ghost = false,
+    alpha = 1, ghost = false, fit = null, aspect = 16 / 9, pad = 0.16,
   } = opts;
   if (!lm) return;
-  const X = (p) => (mirror ? (1 - p[0]) : p[0]) * W;
-  const Y = (p) => p[1] * H;
-  const vis = (p) => p[3] > 0.35;
+  const vis = (p) => p[3] > VISIBLE;
+
+  let X, Y;
+  if (fit) {
+    // Work in units of source height so the figure is never stretched, then
+    // letterbox the padded bounding box into the canvas.
+    const bx0 = fit.x0 * aspect, bx1 = fit.x1 * aspect;
+    const padX = (bx1 - bx0) * pad, padY = (fit.y1 - fit.y0) * pad;
+    const bw = (bx1 - bx0) + padX * 2 || 1;
+    const bh = (fit.y1 - fit.y0) + padY * 2 || 1;
+    const s = Math.min(W / bw, H / bh);
+    const left = (W - bw * s) / 2;
+    const top = (H - bh * s) / 2;
+    // Mirroring flips around the bounding box rather than the source frame, so
+    // the figure stays centred instead of sliding off to the opposite side.
+    X = mirror
+      ? (p) => ((bx1 + padX) - p[0] * aspect) * s + left
+      : (p) => (p[0] * aspect - (bx0 - padX)) * s + left;
+    Y = (p) => (p[1] - (fit.y0 - padY)) * s + top;
+  } else {
+    X = (p) => (mirror ? (1 - p[0]) : p[0]) * W;
+    Y = (p) => p[1] * H;
+  }
 
   ctx.save();
   ctx.globalAlpha = alpha;
