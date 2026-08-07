@@ -11,6 +11,7 @@ import { readFile, writeFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { createTrending } from './trending.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA = path.join(__dirname, 'data');
@@ -18,6 +19,7 @@ const VIDEOS = path.join(DATA, 'videos');
 const POSES = path.join(DATA, 'poses');
 const META = path.join(DATA, 'meta');
 const SCORES = path.join(DATA, 'scores.json');
+const TRENDING = path.join(DATA, 'trending.json');
 for (const d of [DATA, VIDEOS, POSES, META]) mkdirSync(d, { recursive: true });
 
 const app = express();
@@ -50,6 +52,11 @@ function ytdlp(args) {
     });
   });
 }
+
+// Rolling feed of dance challenges circulating right now. Keyless by default
+// (yt-dlp search); set YOUTUBE_API_KEY for the real "most popular" chart.
+const trending = createTrending({ ytdlp, cacheFile: TRENDING });
+trending.init().catch(() => {});
 
 app.post('/api/videos', async (req, res) => {
   const id = parseYouTubeId(req.body?.url || '');
@@ -155,6 +162,16 @@ app.get('/api/library', async (_req, res) => {
   }
   items.sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
   res.json(items);
+});
+
+// What's circulating now — the feed the home screen opens on.
+app.get('/api/trending', async (_req, res) => {
+  try {
+    const { items, at } = await trending.get();
+    res.json({ items, updatedAt: at, live: trending.hasApiKey });
+  } catch {
+    res.json({ items: [], updatedAt: 0, live: false });
+  }
 });
 
 // Related routines: other people's takes on the same song, so you can find a
