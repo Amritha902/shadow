@@ -7,6 +7,7 @@
 
 import { poseAt, drawStickman, comparePoses, framesBounds, poseBounds, easeBounds } from './stickman.js';
 import { createLandmarker } from './pose.js';
+import { BurnMeter, intensityLabel } from './fitness.js';
 import { h, beep } from './ui.js';
 
 const JUDGEMENTS = [
@@ -49,6 +50,8 @@ export class Battle {
     this._smooth = 0;
     this._lastJudge = 0;
     this._window = [];
+    // The workout side of the score: your own motion, turned into calories live.
+    this.burn = new BurnMeter({ weightKg: this.o.weightKg || 65 });
   }
 
   async mountUI() {
@@ -62,6 +65,7 @@ export class Battle {
       this.elScore = h('div', { class: 'hud-score' }, '0'),
       this.elCombo = h('div', { class: 'hud-combo' }),
       this.elBar = h('div', { class: 'hud-bar' }, this.elBarFill = h('i')),
+      this.elBurn = h('div', { class: 'hud-burn' }, h('b', {}, '0'), h('small', {}, 'kcal')),
     );
     this.judgeLayer = h('div', { class: 'battle-judge' });
     this.countIn = h('div', { class: 'battle-countin' });
@@ -181,6 +185,10 @@ export class Battle {
         });
       }
 
+      // Calories accrue from your own motion, timed by the wall clock so the
+      // rate is right even when the model drops frames.
+      if (this.userPose) this.burn.push(this.userPose, performance.now() / 1000);
+
       if (cmp) this._accumulate(cmp, t);
       this._drawPops(ctx);
       this._paintHud(cmp);
@@ -237,6 +245,8 @@ export class Battle {
     const pct = Math.max(0, Math.min(100, cmp ? this._smooth : 0));
     this.elBarFill.style.width = `${pct}%`;
     this.elBarFill.style.background = pct > 72 ? getCSS('--good') : pct > 45 ? getCSS('--warn') : getCSS('--accent');
+    this.elBurn.firstChild.textContent = this.burn.kcal.toFixed(1);
+    this.elBurn.classList.toggle('hot', this.burn.intensity > 0.6);
   }
 
   result() {
@@ -244,9 +254,12 @@ export class Battle {
       ? this.samples.reduce((a, b) => a + b, 0) / this.samples.length
       : 0;
     const rank = acc >= 85 ? 'S' : acc >= 75 ? 'A' : acc >= 62 ? 'B' : acc >= 45 ? 'C' : 'D';
+    const b = this.burn.summary();
     return {
       score: this.score, accuracy: Math.round(acc), bestCombo: this.bestCombo,
       tally: { ...this.tally }, rank,
+      kcal: b.kcal, activeSeconds: b.activeSeconds, intensity: b.peakIntensity,
+      intensityLabel: intensityLabel(b.peakIntensity),
     };
   }
 

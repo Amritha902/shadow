@@ -6,7 +6,10 @@ import { Studio } from './studio.js';
 import { Battle } from './battle.js';
 import { Party } from './party.js';
 import * as spotify from './spotify.js';
+import { recordSession } from './fitness.js';
 import { h, $, clear, fmtTime, toast, confetti, store, beep } from './ui.js';
+
+const bodyWeightKg = () => Number(store.get('weightKg', 65)) || 65;
 
 const app = $('#app');
 const party = new Party();
@@ -173,14 +176,15 @@ async function viewHome() {
 
   const libGrid = h('div', { class: 'lib-grid' });
   const suggestBox = h('div', { class: 'suggest' });
+  const trendingBox = h('div', { class: 'trending' });
 
   const node = shell(
     h('section', { class: 'hero' },
       h('h1', {},
-        'Any dance. ', h('em', {}, 'Any link.'), h('br'), 'Learn the hookstep in an afternoon.',
+        'Any dance. ', h('em', {}, 'Any link.'), h('br'), 'Learn it. Battle it. Break a sweat.',
       ),
       h('p', { class: 'lede' },
-        'Choreo watches the video, strips the dancer down to a stickman, finds the phrase the routine keeps repeating, and loops it at whatever speed you can handle. Then it turns on your camera and scores you.',
+        'Choreo watches the video, strips the dancer down to a stickman, and finds the phrase the routine keeps repeating. You loop it at your own speed — then it turns on your camera, scores you move for move, and counts the calories while you go.',
       ),
       form,
       h('div', { class: 'hero-row' },
@@ -188,6 +192,8 @@ async function viewHome() {
         h('span', { class: 'muted small' }, 'Up to 12 phones, one routine, one leaderboard.'),
       ),
     ),
+    fitnessStrip(),
+    trendingBox,
     h('section', { class: 'features' },
       feature('★', 'Hookstep finder', 'It finds the repeated phrase on its own — the eight counts everyone actually knows.'),
       feature('🕺', 'Stickman mode', 'No outfit, no crowd, no camera swing. Just the shape your body has to make.'),
@@ -223,6 +229,57 @@ async function viewHome() {
   });
 
   paintSuggestions(suggestBox);
+  paintTrending(trendingBox);
+}
+
+// The workout at a glance — only once there's a history to show, so a first-time
+// visitor isn't met with a wall of zeroes.
+function fitnessStrip() {
+  const f = JSON.parse(localStorage.getItem('choreo.fitness.v1') || '{}');
+  if (!f.sessions) return null;
+  const mins = Math.round((f.totalSeconds || 0) / 60);
+  return h('section', { class: 'fit-strip' },
+    stat('🔥', f.streak || 0, (f.streak === 1 ? 'day' : 'days') + ' in a row'),
+    stat('⚡', Math.round(f.totalKcal || 0), 'kcal burned'),
+    stat('⏱', mins, mins === 1 ? 'active minute' : 'active minutes'),
+    stat('🏅', f.sessions || 0, f.sessions === 1 ? 'routine danced' : 'routines danced'),
+  );
+}
+function stat(icon, value, label) {
+  return h('div', { class: 'fit-stat' },
+    h('span', { class: 'fit-icon' }, icon),
+    h('b', {}, value.toLocaleString()),
+    h('small', {}, label),
+  );
+}
+
+// Trending: the auto-updating feed. Cards open the same pipeline as pasting a
+// link — tap one and it downloads, extracts, and drops you in the studio.
+async function paintTrending(box) {
+  clear(box);
+  box.append(h('div', { class: 'section-head' },
+    h('h2', {}, 'Trending now'),
+    h('span', { class: 'muted small' }, 'Dance challenges going around this week'),
+  ));
+  const grid = h('div', { class: 'trend-grid' });
+  box.append(grid, h('p', { class: 'muted small load-note' }, 'Pulling the latest…'));
+  try {
+    const { items } = await (await fetch('/api/trending')).json();
+    box.querySelector('.load-note')?.remove();
+    if (!items?.length) { box.remove(); return; }
+    for (const it of items) {
+      grid.append(h('button', {
+        class: 'trend-card',
+        onclick: () => openLink(`https://www.youtube.com/watch?v=${it.id}`),
+      },
+        h('img', { src: it.thumbnail, alt: '', loading: 'lazy' }),
+        h('span', { class: 'trend-title' }, it.title),
+        h('span', { class: 'trend-meta' }, it.channel || 'YouTube', it.duration ? ` · ${fmtTime(it.duration)}` : ''),
+      ));
+    }
+  } catch {
+    box.remove(); // the feed is a bonus, never a blocker
+  }
 }
 
 function feature(icon, title, body) {
@@ -336,7 +393,7 @@ async function viewBattle(id, { partyMode = false, startAt = 0 } = {}) {
 
   const b = new Battle({
     mount: stage, frames: pose.frames, videoUrl: `/videos/${id}.mp4`, region, mirror: true,
-    aspect: pose.aspect || 16 / 9,
+    aspect: pose.aspect || 16 / 9, weightKg: bodyWeightKg(),
     onTick: ({ score, combo }) => { if (partyMode) party.tick(score, combo); },
     onEnd: (result) => finishBattle(id, meta, result, partyMode),
   });
@@ -380,6 +437,10 @@ async function finishBattle(id, meta, result, partyMode) {
   if (result.rank === 'S' || result.rank === 'A') confetti();
   beep(880, 0.12, 0.1, 'triangle');
 
+  // Log the workout: calories toward lifetime totals, and today toward the
+  // streak. Done before the board fetch so the number is ready to show.
+  const fit = recordSession({ kcal: result.kcal || 0, seconds: result.activeSeconds || 0, intensity: result.intensity || 0 });
+
   let board = [];
   try {
     board = await (await fetch(`/api/scores/${id}`, {
@@ -393,6 +454,13 @@ async function finishBattle(id, meta, result, partyMode) {
     h('div', { class: 'sc-body' },
       h('h1', {}, result.score.toLocaleString()),
       h('p', { class: 'muted' }, `${result.accuracy}% match · best combo ${result.bestCombo}`),
+      h('div', { class: 'burn-row' },
+        h('span', { class: 'burn-chip' }, h('b', {}, `${(result.kcal || 0).toFixed(0)}`), ' kcal'),
+        h('span', { class: 'burn-chip' }, result.intensityLabel || 'light'),
+        fit.streakChanged
+          ? h('span', { class: 'burn-chip streak' }, `🔥 ${fit.streak}-day streak`)
+          : h('span', { class: 'burn-chip' }, `🔥 ${fit.streak}-day streak`),
+      ),
       h('div', { class: 'tally' }, ...Object.entries(result.tally).map(([k, v]) =>
         h('span', { class: `t ${k.toLowerCase()}` }, h('b', {}, v), k))),
     ),
@@ -577,6 +645,17 @@ async function viewSettings() {
   };
   await paintSpotify();
 
+  const weightInput = h('input', {
+    class: 'text-input narrow', type: 'number', min: '30', max: '250',
+    value: store.get('weightKg', 65), placeholder: '65',
+  });
+  weightInput.addEventListener('input', () => {
+    const v = Math.max(30, Math.min(250, Number(weightInput.value) || 65));
+    store.set('weightKg', v);
+  });
+
+  const f = JSON.parse(localStorage.getItem('choreo.fitness.v1') || '{}');
+
   render(shell(h('div', { class: 'settings' },
     h('h1', {}, 'Settings'),
     h('section', { class: 'card' },
@@ -584,6 +663,16 @@ async function viewSettings() {
       h('p', { class: 'muted small' }, 'This is the name and face your friends see on the leaderboard.'),
       h('div', { class: 'row' }, h('span', { class: 'ava big' }, avatar), nameInput),
       avaRow,
+    ),
+    h('section', { class: 'card' },
+      h('h2', {}, 'Fitness'),
+      h('p', { class: 'muted small' }, 'Your weight sharpens the calorie estimate. It stays on this device and is never uploaded.'),
+      h('div', { class: 'row' }, h('label', { class: 'inline-label' }, 'Body weight'), weightInput, h('span', { class: 'muted small' }, 'kg')),
+      f.sessions ? h('div', { class: 'fit-strip inset' },
+        stat('🔥', f.bestStreak || f.streak || 0, 'best streak'),
+        stat('⚡', Math.round(f.totalKcal || 0), 'kcal all-time'),
+        stat('🏅', f.sessions || 0, 'routines'),
+      ) : h('p', { class: 'muted small' }, 'Dance a routine and your streak starts here.'),
     ),
     h('section', {}, h('h2', {}, 'Spotify'), spotifyBox),
     h('section', { class: 'card' },
