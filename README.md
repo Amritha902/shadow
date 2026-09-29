@@ -4,11 +4,16 @@ Paste a YouTube link to a dance. Choreo pulls the video, tracks the dancer's
 body, finds the part of the routine that repeats — the hookstep — and redraws it
 as a stickman you can slow down, mirror and loop until it's in your body.
 
-Then it turns on your camera and scores you against it, alone or in a room with
-your friends.
+Then it turns on your camera and scores you against it move for move — and counts
+the calories while you go. Dance alone, or in a room with your friends. It's a
+rhythm game and a cardio workout wearing the same clothes.
 
-Everything except the video download runs in your browser. No pose data leaves
-the machine.
+The home screen opens on a **Trending** feed of dance challenges that are
+actually going around this week, refreshed automatically, so there's always
+something to learn without hunting for a link.
+
+Everything except the video download runs in your browser. No pose data, and no
+camera frame, ever leaves the machine.
 
 ## Running it
 
@@ -62,11 +67,31 @@ correct dancing as wrong, which is why there are tests pinning it down.
   and a combo meter, results screen, local leaderboard per video.
 - **Party** — a room code, everyone on their own phone, a synchronised start and
   a live leaderboard. Ephemeral: the room lives as long as someone is in it.
+- **Trending** — a rolling feed of dance challenges circulating now. Keyless by
+  default (yt-dlp search); set `YOUTUBE_API_KEY` to power it from YouTube's real
+  most-popular-Music chart. Cached to disk, refreshed every 6 hours.
+- **Fitness** — every routine has a calorie and intensity estimate, live during
+  a battle and totalled after. Daily streaks, lifetime kcal and active minutes.
+  Set your body weight in Settings to sharpen the estimate; it stays on-device.
 - **Related routines** — a search for slower, mirrored tutorials of the same
   song, for when the original is too fast to read.
 - **Spotify** (optional) — connect for profile and top tracks. Uses PKCE, so
   only a client id is needed and no secret touches the server. Set
   `SPOTIFY_CLIENT_ID`, or paste one in the app. Without it the rest still works.
+
+## Calorie estimate — how, and how much to trust it
+
+Pose landmarks are normalised to the video frame, so raw motion depends on how
+much of the shot the dancer fills. Choreo divides every limb displacement by
+torso length, giving speed in *body-lengths per second* — independent of camera
+distance. That maps to a MET (metabolic equivalent) between a slow sway and
+all-out choreography, and MET × body-mass × time is the calorie estimate physios
+use for cardio.
+
+It's a genuine estimate, not a measurement. It can't see how deep you squat or
+what you actually weigh, and it reads effort only from limb speed. Trust it as a
+*consistent relative score* — good for "harder than yesterday" and streaks — not
+as a clinical calorimeter.
 
 ## Tests
 
@@ -74,20 +99,26 @@ correct dancing as wrong, which is why there are tests pinning it down.
 npm test
 ```
 
-11 tests over the parts where being wrong is silent rather than loud: mirror
+20 tests over the parts where being wrong is silent rather than loud: mirror
 handling in scoring, interpolation bounds, hookstep confidence across recorded
 routines, step segmentation covering the routine without gaps, tempo landing in
-a range people actually dance to.
+a range people actually dance to, and the fitness math — intensity monotonic and
+bounded, calories linear in body mass, leap-year-correct streak dates, and real
+routines landing in a human kcal/min range.
 
 ## Status
 
 Honest account of what has and hasn't been exercised:
 
-- Verified end to end in a browser: link → download → extraction → studio, and
+- Verified end to end in a browser: link → download → extraction → studio;
   hookstep detection against three real routines (a Bollywood number, a K-pop
-  cover, a studio choreography), which found 4.2s / 6.4s / 8.9s phrases.
-- **Not yet run live: battle mode and party rooms.** The scoring math is
-  unit-tested and the room protocol is written, but the camera loop and the
-  multiplayer session have not been executed against a real camera or a second
-  device. Expect bugs.
-- Spotify is untested — it needs a real client id and account.
+  cover, a studio choreography), which found 4.2s / 6.4s / 8.9s phrases; the
+  Trending feed pulling real current tutorials; and home/settings rendering
+  clean with no console errors.
+- **Not yet run live: battle mode and party rooms.** The scoring and calorie
+  math is unit-tested and the room protocol is written, but the camera loop, the
+  live burn HUD, and the multiplayer session have not been executed against a
+  real camera or a second device. Expect bugs there.
+- Spotify is untested — it needs a real client id and account. A `YOUTUBE_API_KEY`
+  is optional; without it Trending runs on keyless yt-dlp search, which is what
+  was tested.
