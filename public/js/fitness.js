@@ -191,7 +191,7 @@ export function streakTransition(lastKey, todayKey) {
   return days === 1 ? 'continue' : 'reset';
 }
 
-const FIT_KEY = 'choreo.fitness.v1';
+const FIT_KEY = 'shadow.fitness.v1';
 
 export function loadFitness() {
   try { return JSON.parse(localStorage.getItem(FIT_KEY)) || {}; }

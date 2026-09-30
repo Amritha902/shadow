@@ -6,8 +6,8 @@
 // artists become the seed for routine suggestions, and your profile turns the
 // party lobby from a list of strangers into a room of people with taste.
 
-const KEY = 'choreo.spotify';
-const VERIFIER = 'choreo.spotify.verifier';
+const KEY = 'shadow.spotify';
+const VERIFIER = 'shadow.spotify.verifier';
 const SCOPES = 'user-read-email user-top-read user-read-recently-played';
 
 const store = {
@@ -17,11 +17,11 @@ const store = {
 };
 
 export function clientId() {
-  return localStorage.getItem('choreo.spotify.clientId') || window.CHOREO_SPOTIFY_CLIENT_ID || null;
+  return localStorage.getItem('shadow.spotify.clientId') || window.SHADOW_SPOTIFY_CLIENT_ID || null;
 }
 export function setClientId(id) {
-  if (id) localStorage.setItem('choreo.spotify.clientId', id.trim());
-  else localStorage.removeItem('choreo.spotify.clientId');
+  if (id) localStorage.setItem('shadow.spotify.clientId', id.trim());
+  else localStorage.removeItem('shadow.spotify.clientId');
 }
 
 const redirectUri = () => `${location.origin}/`;
@@ -98,7 +98,7 @@ async function token() {
 }
 
 export const isConnected = () => !!store.get();
-export function logout() { store.clear(); localStorage.removeItem('choreo.spotify.profile'); }
+export function logout() { store.clear(); localStorage.removeItem('shadow.spotify.profile'); }
 
 async function api(path) {
   const t = await token();
@@ -111,7 +111,7 @@ async function api(path) {
 // Profile + taste, cached for a day — this data changes slowly and we'd rather
 // not spend a round trip on every page view.
 export async function profile({ force = false } = {}) {
-  const cached = JSON.parse(localStorage.getItem('choreo.spotify.profile') || 'null');
+  const cached = JSON.parse(localStorage.getItem('shadow.spotify.profile') || 'null');
   if (!force && cached && Date.now() - cached.at < 24 * 3600 * 1000) return cached;
   if (!isConnected()) return null;
 
@@ -133,7 +133,7 @@ export async function profile({ force = false } = {}) {
       image: t.album?.images?.[2]?.url,
     })),
   };
-  localStorage.setItem('choreo.spotify.profile', JSON.stringify(data));
+  localStorage.setItem('shadow.spotify.profile', JSON.stringify(data));
   return data;
 }
 

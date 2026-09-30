@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "choreo",
+      "name": "shadow",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 4173

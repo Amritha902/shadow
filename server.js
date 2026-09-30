@@ -1,4 +1,4 @@
-// Choreo — learn any dance from a YouTube link, then battle your friends to it.
+// Shadow — learn any dance from a YouTube link, then battle your friends to it.
 //
 // The server stays deliberately thin: fetch videos with yt-dlp, serve them with
 // range support, cache the pose data the browser extracts, and relay party-room
@@ -406,4 +406,4 @@ wss.on('connection', (ws) => {
 });
 
 const PORT = process.env.PORT || 4173;
-server.listen(PORT, () => console.log(`Choreo running on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Shadow running on http://localhost:${PORT}`));

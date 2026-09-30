@@ -1,6 +1,6 @@
-# Choreo
+# Shadow
 
-Paste a YouTube link to a dance. Choreo pulls the video, tracks the dancer's
+Paste a YouTube link to a dance. Shadow pulls the video, tracks the dancer's
 body, finds the part of the routine that repeats — the hookstep — and redraws it
 as a stickman you can slow down, mirror and loop until it's in your body.
 
@@ -82,7 +82,7 @@ correct dancing as wrong, which is why there are tests pinning it down.
 ## Calorie estimate — how, and how much to trust it
 
 Pose landmarks are normalised to the video frame, so raw motion depends on how
-much of the shot the dancer fills. Choreo divides every limb displacement by
+much of the shot the dancer fills. Shadow divides every limb displacement by
 torso length, giving speed in *body-lengths per second* — independent of camera
 distance. That maps to a MET (metabolic equivalent) between a slow sway and
 all-out choreography, and MET × body-mass × time is the calorie estimate physios

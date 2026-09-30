@@ -102,8 +102,8 @@ export function beep(freq = 880, dur = 0.07, gain = 0.12, type = 'sine') {
 
 export const store = {
   get(k, fallback) {
-    try { const v = localStorage.getItem(`choreo.${k}`); return v == null ? fallback : JSON.parse(v); }
+    try { const v = localStorage.getItem(`shadow.${k}`); return v == null ? fallback : JSON.parse(v); }
     catch { return fallback; }
   },
-  set(k, v) { localStorage.setItem(`choreo.${k}`, JSON.stringify(v)); },
+  set(k, v) { localStorage.setItem(`shadow.${k}`, JSON.stringify(v)); },
 };

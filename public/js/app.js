@@ -1,4 +1,4 @@
-// Choreo — app shell. Hash routing, four screens, one WebSocket.
+// Shadow — app shell. Hash routing, four screens, one WebSocket.
 
 import { extractPoses } from './pose.js';
 import { drawStickman } from './stickman.js';
@@ -44,7 +44,7 @@ function shell(...children) {
   const me = identity();
   return h('div', { class: 'page' },
     h('nav', { class: 'nav' },
-      h('a', { class: 'brand', href: '#/' }, h('b', {}, 'Choreo'), h('i', {}, 'learn the move')),
+      h('a', { class: 'brand', href: '#/' }, h('b', {}, 'Shadow'), h('i', {}, 'learn the move')),
       h('div', { class: 'nav-right' },
         h('a', { class: 'nav-link', href: '#/party' }, 'Party'),
         h('a', { class: 'nav-link', href: '#/settings' }, 'Settings'),
@@ -184,7 +184,7 @@ async function viewHome() {
         'Any dance. ', h('em', {}, 'Any link.'), h('br'), 'Learn it. Battle it. Break a sweat.',
       ),
       h('p', { class: 'lede' },
-        'Choreo watches the video, strips the dancer down to a stickman, and finds the phrase the routine keeps repeating. You loop it at your own speed — then it turns on your camera, scores you move for move, and counts the calories while you go.',
+        'Shadow watches the video, strips the dancer down to a stickman, and finds the phrase the routine keeps repeating. You loop it at your own speed — then it turns on your camera, scores you move for move, and counts the calories while you go.',
       ),
       form,
       h('div', { class: 'hero-row' },
@@ -235,7 +235,7 @@ async function viewHome() {
 // The workout at a glance — only once there's a history to show, so a first-time
 // visitor isn't met with a wall of zeroes.
 function fitnessStrip() {
-  const f = JSON.parse(localStorage.getItem('choreo.fitness.v1') || '{}');
+  const f = JSON.parse(localStorage.getItem('shadow.fitness.v1') || '{}');
   if (!f.sessions) return null;
   const mins = Math.round((f.totalSeconds || 0) / 60);
   return h('section', { class: 'fit-strip' },
@@ -292,7 +292,7 @@ async function paintSuggestions(box) {
     box.append(h('div', { class: 'spotify-cta' },
       h('div', {},
         h('h3', {}, 'Dance to what you actually listen to'),
-        h('p', { class: 'muted' }, 'Connect Spotify and Choreo pulls your rotation, then points you at routines for the songs already stuck in your head.'),
+        h('p', { class: 'muted' }, 'Connect Spotify and Shadow pulls your rotation, then points you at routines for the songs already stuck in your head.'),
       ),
       h('a', { class: 'btn ghost', href: '#/settings' }, 'Connect Spotify'),
     ));
@@ -344,7 +344,7 @@ async function viewLearn(id) {
     const { meta, pose } = await loadRoutine(id, ui);
     const studio = Studio({
       meta, pose,
-      onBattle: (region) => { sessionStorage.setItem('choreo.region', JSON.stringify(region)); location.hash = `#/battle/${id}`; },
+      onBattle: (region) => { sessionStorage.setItem('shadow.region', JSON.stringify(region)); location.hash = `#/battle/${id}`; },
       onOpen: (url) => openLink(url),
     });
     teardown = () => studio.destroy();
@@ -369,7 +369,7 @@ async function viewBattle(id, { partyMode = false, startAt = 0 } = {}) {
 
   let region = [0, pose.duration || meta.duration];
   try {
-    const saved = JSON.parse(sessionStorage.getItem('choreo.region') || 'null');
+    const saved = JSON.parse(sessionStorage.getItem('shadow.region') || 'null');
     if (Array.isArray(saved) && !partyMode) region = saved;
   } catch { /* ignore */ }
   if (partyMode) {
@@ -403,7 +403,7 @@ async function viewBattle(id, { partyMode = false, startAt = 0 } = {}) {
     await b.mountUI();
   } catch (e) {
     toast(e.name === 'NotAllowedError'
-      ? 'Choreo needs the camera to score you. Allow it and reload.'
+      ? 'Shadow needs the camera to score you. Allow it and reload.'
       : `Camera trouble: ${e.message}`, 'bad');
     location.hash = `#/learn/${id}`;
     return;
@@ -609,7 +609,7 @@ async function viewSettings() {
   nameInput.addEventListener('input', () => store.set('name', nameInput.value.slice(0, 20)));
 
   const clientInput = h('input', {
-    class: 'text-input', value: localStorage.getItem('choreo.spotify.clientId') || '',
+    class: 'text-input', value: localStorage.getItem('shadow.spotify.clientId') || '',
     placeholder: 'Spotify client ID',
   });
 
@@ -630,7 +630,7 @@ async function viewSettings() {
     }
     spotifyBox.append(
       h('p', { class: 'muted' },
-        'Choreo talks to Spotify straight from your browser using PKCE — there is no server secret and your token never leaves this device. ',
+        'Shadow talks to Spotify straight from your browser using PKCE — there is no server secret and your token never leaves this device. ',
         config.spotifyClientId ? '' : 'Create an app at developer.spotify.com, add ',
         config.spotifyClientId ? '' : h('code', {}, `${location.origin}/`),
         config.spotifyClientId ? '' : ' as a redirect URI, and paste the client ID here.',
@@ -654,7 +654,7 @@ async function viewSettings() {
     store.set('weightKg', v);
   });
 
-  const f = JSON.parse(localStorage.getItem('choreo.fitness.v1') || '{}');
+  const f = JSON.parse(localStorage.getItem('shadow.fitness.v1') || '{}');
 
   render(shell(h('div', { class: 'settings' },
     h('h1', {}, 'Settings'),
@@ -705,7 +705,7 @@ addEventListener('hashchange', route);
 
 (async function boot() {
   try { config = await (await fetch('/api/config')).json(); } catch { config = {}; }
-  if (config.spotifyClientId) window.CHOREO_SPOTIFY_CLIENT_ID = config.spotifyClientId;
+  if (config.spotifyClientId) window.SHADOW_SPOTIFY_CLIENT_ID = config.spotifyClientId;
   if (await spotify.handleRedirect()) toast('Spotify connected.');
   route();
 })();

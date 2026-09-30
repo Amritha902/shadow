@@ -1,7 +1,7 @@
 {
-  "name": "choreo",
+  "name": "shadow",
   "version": "0.1.0",
-  "description": "Learn any dance from a YouTube link — AI stickman choreography breakdown",
+  "description": "Shadow — learn any dance from a YouTube link, battle it on camera, and count the calories. A rhythm game and a cardio workout in one.",
   "type": "module",
   "main": "server.js",
   "scripts": {
