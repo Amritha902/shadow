@@ -5,7 +5,7 @@
 // MediaPipe, and the two are compared bone-direction to bone-direction. The
 // score you see is the score, computed on your device, no round trips.
 
-import { poseAt, drawStickman, comparePoses, framesBounds, poseBounds, easeBounds } from './stickman.js';
+import { poseAt, drawStickman, comparePoses, mirrorPose, framesBounds, poseBounds, easeBounds } from './stickman.js';
 import { createLandmarker } from './pose.js';
 import { BurnMeter, intensityLabel } from './fitness.js';
 import { h, beep } from './ui.js';
