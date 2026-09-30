@@ -115,10 +115,15 @@ Honest account of what has and hasn't been exercised:
   cover, a studio choreography), which found 4.2s / 6.4s / 8.9s phrases; the
   Trending feed pulling real current tutorials; and home/settings rendering
   clean with no console errors.
-- **Not yet run live: battle mode and party rooms.** The scoring and calorie
-  math is unit-tested and the room protocol is written, but the camera loop, the
-  live burn HUD, and the multiplayer session have not been executed against a
-  real camera or a second device. Expect bugs there.
+- **Solo battle: verified end to end.** Driven by feeding a routine video back
+  in as a synthetic camera — count-in, live MediaPipe pose detection, the
+  reference and learner stickmen, judgements and combo, the live calorie HUD,
+  the results card (rank + kcal + intensity + streak) and the leaderboard all
+  run. This caught and fixed a fatal bug: `battle.js` was missing the
+  `mirrorPose` import and froze at score 0 the moment a pose appeared.
+- **Party rooms: not yet run live.** The room protocol is written and the lobby
+  renders, but a real synchronised multiplayer session needs a second device and
+  has not been exercised. Expect bugs there.
 - Spotify is untested — it needs a real client id and account. A `YOUTUBE_API_KEY`
   is optional; without it Trending runs on keyless yt-dlp search, which is what
   was tested.
