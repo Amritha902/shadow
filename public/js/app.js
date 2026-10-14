@@ -1,7 +1,7 @@
 // Shadow — app shell. Hash routing, four screens, one WebSocket.
 
 import { extractPoses } from './pose.js';
-import { drawStickman } from './stickman.js';
+import { drawStickman, segmentSteps, weakestStep } from './stickman.js';
 import { Studio } from './studio.js';
 import { Battle } from './battle.js';
 import { Party } from './party.js';
@@ -391,8 +391,14 @@ async function viewBattle(id, { partyMode = false, startAt = 0 } = {}) {
     partyMode ? roster : null,
   )));
 
+  // The same auto-cut steps the studio shows, trimmed to the bars being danced,
+  // so the results can say which step to go back and drill.
+  const steps = segmentSteps(pose.frames, pose.duration || meta.duration)
+    .map((s) => ({ ...s, start: Math.max(s.start, region[0]), end: Math.min(s.end, region[1]) }))
+    .filter((s) => s.end - s.start > 0.3);
+
   const b = new Battle({
-    mount: stage, frames: pose.frames, videoUrl: `/videos/${id}.mp4`, region, mirror: true,
+    mount: stage, frames: pose.frames, videoUrl: `/videos/${id}.mp4`, region, mirror: true, steps,
     aspect: pose.aspect || 16 / 9, weightKg: bodyWeightKg(),
     onTick: ({ score, combo }) => { if (partyMode) party.tick(score, combo); },
     onEnd: (result) => finishBattle(id, meta, result, partyMode),
@@ -466,9 +472,33 @@ async function finishBattle(id, meta, result, partyMode) {
     ),
   );
 
+  const steps = result.steps || [];
+  const weakest = weakestStep(steps);
+  const drill = (s) => {
+    sessionStorage.setItem('shadow.studioRegion', JSON.stringify([s.start, s.end]));
+    location.hash = `#/learn/${id}`;
+  };
+  const stepReport = steps.length > 1 ? h('section', { class: 'step-report' },
+    h('h2', {}, 'Step by step'),
+    weakest ? h('p', { class: 'muted small' },
+      `Work on ${weakest.label}`, weakest.worst ? ` — mostly your ${weakest.worst}.` : '.') : null,
+    h('ol', {}, ...steps.map((s) => {
+      const pct = s.accuracy ?? 0;
+      const tone = s.accuracy == null ? 'none' : pct >= 72 ? 'good' : pct >= 45 ? 'warn' : 'bad';
+      return h('li', { class: `step-row ${tone}${s === weakest ? ' weakest' : ''}` },
+        h('span', { class: 'lbl' }, s.label, h('small', {}, `${fmtTime(s.start)}–${fmtTime(s.end)}`)),
+        h('span', { class: 'bar' }, h('i', { style: `width:${pct}%` })),
+        h('b', {}, s.accuracy == null ? '—' : `${s.accuracy}%`),
+        h('small', { class: 'why' }, s.accuracy == null ? 'not seen' : s.worst ? s.worst : ''),
+        h('button', { class: 'btn tiny ghost', onclick: () => drill(s) }, 'Drill'),
+      );
+    })),
+  ) : null;
+
   render(shell(h('div', { class: 'results' },
     h('p', { class: 'eyebrow' }, meta.title),
     card,
+    stepReport,
     board.length ? h('section', { class: 'board' },
       h('h2', {}, 'Best on this routine'),
       h('ol', {}, ...board.slice(0, 8).map((r) => h('li', {},

@@ -64,7 +64,8 @@ correct dancing as wrong, which is why there are tests pinning it down.
 - **Studio** — video and stickman side by side and in sync, variable speed,
   mirror, auto-cut steps, loop any region.
 - **Battle** — count-in, live per-frame scoring against the routine, judgements
-  and a combo meter, results screen, local leaderboard per video.
+  and a combo meter, wrong limbs painted red as you dance, a per-step report
+  with a Drill button for your weakest step, local leaderboard per video.
 - **Party** — a room code, everyone on their own phone, a synchronised start and
   a live leaderboard. Ephemeral: the room lives as long as someone is in it.
 - **Trending** — a rolling feed of dance challenges circulating now. Keyless by
@@ -121,6 +122,12 @@ Honest account of what has and hasn't been exercised:
   the results card (rank + kcal + intensity + streak) and the leaderboard all
   run. This caught and fixed a fatal bug: `battle.js` was missing the
   `mirrorPose` import and froze at score 0 the moment a pose appeared.
+- **Step-by-step coaching: unit-tested, not yet run in a browser.** During a
+  battle, any limb more than ~50° off the reference turns red on your stickman.
+  The results screen scores each auto-cut step separately, names the limb you
+  missed most in it, and a Drill button opens the studio looping that step. The
+  bucketing and limb mapping are covered by `test/steps.test.mjs`; the drawing
+  and results screen have not been exercised with a real camera yet.
 - **Party rooms: not yet run live.** The room protocol is written and the lobby
   renders, but a real synchronised multiplayer session needs a second device and
   has not been exercised. Expect bugs there.

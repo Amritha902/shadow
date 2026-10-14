@@ -102,6 +102,7 @@ export function drawStickman(ctx, lm, opts = {}) {
     W = ctx.canvas.width, H = ctx.canvas.height,
     mirror = false, color = '#201b16', glow = null, lineWidth = null,
     alpha = 1, ghost = false, fit = null, aspect = 16 / 9, pad = 0.16,
+    boneColor = null,
   } = opts;
   if (!lm) return;
   const vis = (p) => p[3] > VISIBLE;
@@ -142,10 +143,15 @@ export function drawStickman(ctx, lm, opts = {}) {
   ctx.lineWidth = lw;
   for (const [a, b] of BONES) {
     if (!vis(lm[a]) || !vis(lm[b])) continue;
+    // A per-bone override lets the battle paint the limb you have wrong in a
+    // different colour from the rest of you.
+    const c = boneColor?.(a, b);
+    if (c) { ctx.strokeStyle = c; if (glow) ctx.shadowColor = c; }
     ctx.beginPath();
     ctx.moveTo(X(lm[a]), Y(lm[a]));
     ctx.lineTo(X(lm[b]), Y(lm[b]));
     ctx.stroke();
+    if (c) { ctx.strokeStyle = color; if (glow) ctx.shadowColor = glow; }
   }
 
   // Neck + head: circle sized from ear spread, sitting above the shoulder midpoint.
@@ -248,6 +254,18 @@ const LIMBS = [
   { name: 'torso', pairs: [[LM.leftShoulder, LM.leftHip], [LM.rightShoulder, LM.rightHip], [LM.leftShoulder, LM.rightShoulder]] },
 ];
 
+// Which named limb a bone belongs to, so a drawing can colour it by that
+// limb's score. Keyed both ways round because BONES and LIMBS list some pairs
+// in opposite orders.
+const BONE_LIMB = new Map();
+for (const limb of LIMBS) {
+  for (const [a, b] of limb.pairs) {
+    BONE_LIMB.set(`${a}-${b}`, limb.name);
+    BONE_LIMB.set(`${b}-${a}`, limb.name);
+  }
+}
+export const limbOfBone = (a, b) => BONE_LIMB.get(`${a}-${b}`) ?? null;
+
 function limbVec(lm, a, b) {
   const dx = lm[b][0] - lm[a][0], dy = lm[b][1] - lm[a][1];
   const n = Math.hypot(dx, dy) || 1;
@@ -277,4 +295,36 @@ export function comparePoses(refLm, userLm) {
   const score = Math.round(Math.max(0, (raw - 0.5) / 0.5) ** 1.6 * 100);
   limbScores.sort((a, b) => a.score - b.score);
   return { score, worst: limbScores[0], limbs: limbScores };
+}
+
+// ---------- per-step report ----------
+// A battle judges you roughly twice a second. Bucketing those judgements by the
+// routine's own steps turns one overall percentage into "step 3 is the one you
+// can't do yet, and it's your left arm" — something you can actually go and fix.
+//
+// samples: [{ t, score, worst }] where worst is the weakest limb's name.
+// A step nobody was judged in (you were out of frame, or it was outside the
+// region) reports accuracy null rather than a made-up zero.
+export function scoreSteps(steps, samples) {
+  return steps.map((s) => {
+    const inStep = samples.filter((x) => x.t >= s.start && x.t < s.end);
+    if (!inStep.length) return { ...s, accuracy: null, worst: null, judged: 0 };
+    const accuracy = Math.round(inStep.reduce((a, x) => a + x.score, 0) / inStep.length);
+    // The limb that was weakest most often across the step, not in one frame.
+    const counts = new Map();
+    for (const x of inStep) if (x.worst) counts.set(x.worst, (counts.get(x.worst) || 0) + 1);
+    let worst = null, most = 0;
+    for (const [name, n] of counts) if (n > most) { worst = name; most = n; }
+    return { ...s, accuracy, worst, judged: inStep.length };
+  });
+}
+
+// The step to drill next: lowest accuracy among steps that were actually judged.
+export function weakestStep(report) {
+  let pick = null;
+  for (const s of report) {
+    if (s.accuracy == null) continue;
+    if (!pick || s.accuracy < pick.accuracy) pick = s;
+  }
+  return pick;
 }

@@ -22,6 +22,12 @@ export function Studio({ meta, pose, onBattle, onOpen }) {
   let mirror = store.get('mirror', true);
   let rate = store.get('rate', 1);
   let region = hook ? [hook.start, hook.end] : [0, duration];
+  // Arriving from a battle's "Drill" button: open on that step instead of the hook.
+  try {
+    const drill = JSON.parse(sessionStorage.getItem('shadow.studioRegion') || 'null');
+    sessionStorage.removeItem('shadow.studioRegion');
+    if (Array.isArray(drill) && drill[1] > drill[0]) region = drill;
+  } catch { /* ignore */ }
   let looping = true;
   let stickOnly = false;
 

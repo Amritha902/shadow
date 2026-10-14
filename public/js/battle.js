@@ -5,7 +5,7 @@
 // MediaPipe, and the two are compared bone-direction to bone-direction. The
 // score you see is the score, computed on your device, no round trips.
 
-import { poseAt, drawStickman, comparePoses, mirrorPose, framesBounds, poseBounds, easeBounds } from './stickman.js';
+import { poseAt, drawStickman, comparePoses, mirrorPose, framesBounds, poseBounds, easeBounds, limbOfBone, scoreSteps } from './stickman.js';
 import { createLandmarker } from './pose.js';
 import { BurnMeter, intensityLabel } from './fitness.js';
 import { h, beep } from './ui.js';
@@ -17,6 +17,11 @@ const JUDGEMENTS = [
   { at: 35, label: 'OFF', points: 25, cls: 'off' },
   { at: -1, label: 'MISS', points: 0, cls: 'miss' },
 ];
+// A limb whose bone directions agree less than this (0..1, cosine-based, so 0.5
+// is perpendicular) is drawn in OFF_COLOR on your stickman.
+const OFF_LIMB = 0.8;
+const OFF_COLOR = '#ff2d55';
+
 const judge = (s) => JUDGEMENTS.find((j) => s >= j.at);
 
 // Combo multiplier caps at 4x — high enough to make a clean run feel special,
@@ -32,6 +37,7 @@ export class Battle {
    * @param {[number,number]} [o.region] [start,end] seconds — defaults to whole clip
    * @param {boolean} [o.mirror]         mirror the reference (face-to-face teaching)
    * @param {number} [o.rate]            playback rate
+   * @param {Array}  [o.steps]           [{label,start,end}] — scored separately in the result
    */
   constructor(o) {
     this.o = { mirror: true, rate: 1, aspect: 16 / 9, ...o };
@@ -44,6 +50,7 @@ export class Battle {
     this.combo = 0;
     this.bestCombo = 0;
     this.samples = [];
+    this.timeline = [];
     this.tally = { PERFECT: 0, GREAT: 0, GOOD: 0, OFF: 0, MISS: 0 };
     this.running = false;
     this._pops = [];
@@ -176,12 +183,17 @@ export class Battle {
         cmp = comparePoses(o.mirror ? mirrorPose(ref) : ref, this.userPose);
         const hot = cmp && cmp.score >= 72;
         this.userBounds = easeBounds(this.userBounds, poseBounds(this.userPose), 0.12);
+        // Limbs well off the reference turn red, so you can see which part of
+        // you is wrong without reading anything. The comparison runs on your
+        // own landmark labels, so a limb name maps straight onto your bones.
+        const off = new Set((cmp?.limbs || []).filter((l) => l.score < OFF_LIMB).map((l) => l.name));
         drawStickman(ctx, this.userPose, {
           W: this.W, H: this.H, mirror: o.mirror,
           fit: this.userBounds, aspect: this.camAspect,
           color: hot ? getCSS('--good') : getCSS('--accent'),
           glow: hot ? getCSS('--good') : getCSS('--accent'),
           lineWidth: Math.max(4, this.W * 0.011),
+          boneColor: off.size ? (a, b) => (off.has(limbOfBone(a, b)) ? OFF_COLOR : null) : null,
         });
       }
 
@@ -208,6 +220,7 @@ export class Battle {
     const avg = this._window.reduce((a, b) => a + b, 0) / this._window.length;
     this._window.length = 0;
     this.samples.push(avg);
+    this.timeline.push({ t, score: avg, worst: cmp.worst?.name || null });
 
     const j = judge(avg);
     this.tally[j.label]++;
@@ -260,6 +273,7 @@ export class Battle {
       tally: { ...this.tally }, rank,
       kcal: b.kcal, activeSeconds: b.activeSeconds, intensity: b.peakIntensity,
       intensityLabel: intensityLabel(b.peakIntensity),
+      steps: scoreSteps(this.o.steps || [], this.timeline),
     };
   }
 
