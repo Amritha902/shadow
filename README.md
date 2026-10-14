@@ -12,7 +12,12 @@ The home screen opens on a **Trending** feed of dance challenges that are
 actually going around this week, refreshed automatically, so there's always
 something to learn without hunting for a link.
 
-Everything except the video download runs in your browser. No pose data, and no
+When the song ends, an **AI coach** — a Claude agent with tools — reads your
+run step by step, checks how you did last time, pulls teaching cues from a
+coaching library, and hands you one plan: the step to drill, what to fix in
+your body, and at what speed.
+
+Everything except the video download and the coach runs in your browser. No pose data, and no
 camera frame, ever leaves the machine.
 
 ## Running it
@@ -22,8 +27,11 @@ Requires Node 18+ and [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) on your PATH.
 ```sh
 brew install yt-dlp     # or: pipx install yt-dlp
 npm install
+export ANTHROPIC_API_KEY=...   # optional — without it the coach runs offline (rule-based)
 npm start               # http://localhost:4173
 ```
+
+Full technical specification, requirements and API: [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md).
 
 Battle mode needs a camera, and browsers only grant camera access over HTTPS or
 on `localhost`. Opening the app by LAN IP will silently fail to get a webcam.
@@ -58,6 +66,17 @@ camera don't matter. The learner's pose is mirrored limb-for-limb — left arm
 compared against the reference's right — so copying face-to-face, the way you
 would in a studio, scores the same as copying side-on. Getting this wrong marks
 correct dancing as wrong, which is why there are tests pinning it down.
+
+**The coach** (`coach.js`) is an agent, not a single prompt. The browser sends
+the finished battle's step report — per-step accuracy, per-limb agreement, and
+your joint angles against the dancer's. Claude gets five tools and decides what
+to look at: `get_step_report`, `get_step_detail`, `get_past_attempts` (memory
+of your previous runs on this routine), `lookup_technique` (retrieval from a
+small hand-written cue library in `coach-cues.js`) and `submit_plan` (strict
+schema, validated before it is shown). Every number it can quote comes out of a
+tool. With no credentials or on any API failure, a rule-based coach answers
+instead and the card says so. The results screen shows the trail of tool calls
+under "How the coach got here".
 
 ## What's in it
 
@@ -100,12 +119,16 @@ as a clinical calorimeter.
 npm test
 ```
 
-20 tests over the parts where being wrong is silent rather than loud: mirror
+30 tests run on a fresh clone, plus 11 more that need recorded routines in
+`data/poses`. They cover the parts where being wrong is silent rather than loud: mirror
 handling in scoring, interpolation bounds, hookstep confidence across recorded
 routines, step segmentation covering the routine without gaps, tempo landing in
 a range people actually dance to, and the fitness math — intensity monotonic and
 bounded, calories linear in body mass, leap-year-correct streak dates, and real
-routines landing in a human kcal/min range.
+routines landing in a human kcal/min range; per-step bucketing and joint
+angles; and the coach — input sanitising, retrieval ranking, memory, and the
+full agent loop against a scripted model, including recovering from a bad tool
+call and rejecting a plan for a step that doesn't exist.
 
 ## Status
 
@@ -122,7 +145,12 @@ Honest account of what has and hasn't been exercised:
   the results card (rank + kcal + intensity + streak) and the leaderboard all
   run. This caught and fixed a fatal bug: `battle.js` was missing the
   `mirrorPose` import and froze at score 0 the moment a pose appeared.
-- **Step-by-step coaching: unit-tested, not yet run in a browser.** During a
+- **AI coach: agent loop tested against a scripted model, not yet run against
+  the live Claude API** (no key in the build environment). The server route,
+  offline fallback and memory were exercised over HTTP — a second run reported
+  "Step 2 before: 36%; now 55%" — and the results screen with the coach card
+  rendered cleanly in Chromium at desktop and phone width.
+- **Step-by-step coaching: unit-tested; results screen rendered in a browser.** During a
   battle, any limb more than ~50° off the reference turns red on your stickman.
   The results screen scores each auto-cut step separately, names the limb you
   missed most in it, and a Drill button opens the studio looping that step. The

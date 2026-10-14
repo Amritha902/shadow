@@ -5,7 +5,7 @@
 // MediaPipe, and the two are compared bone-direction to bone-direction. The
 // score you see is the score, computed on your device, no round trips.
 
-import { poseAt, drawStickman, comparePoses, mirrorPose, framesBounds, poseBounds, easeBounds, limbOfBone, scoreSteps } from './stickman.js';
+import { poseAt, drawStickman, comparePoses, mirrorPose, framesBounds, poseBounds, easeBounds, limbOfBone, scoreSteps, jointAngles } from './stickman.js';
 import { createLandmarker } from './pose.js';
 import { BurnMeter, intensityLabel } from './fitness.js';
 import { h, beep } from './ui.js';
@@ -180,7 +180,8 @@ export class Battle {
         // Score against the reflection, not the original: reflecting swaps the
         // sides of the body, which flipping x alone does not, and without it
         // every mirrored limb would read as the wrong limb.
-        cmp = comparePoses(o.mirror ? mirrorPose(ref) : ref, this.userPose);
+        this._ref = o.mirror ? mirrorPose(ref) : ref;
+        cmp = comparePoses(this._ref, this.userPose);
         const hot = cmp && cmp.score >= 72;
         this.userBounds = easeBounds(this.userBounds, poseBounds(this.userPose), 0.12);
         // Limbs well off the reference turn red, so you can see which part of
@@ -220,7 +221,14 @@ export class Battle {
     const avg = this._window.reduce((a, b) => a + b, 0) / this._window.length;
     this._window.length = 0;
     this.samples.push(avg);
-    this.timeline.push({ t, score: avg, worst: cmp.worst?.name || null });
+    // What the coach gets to read afterwards: per-limb agreement and the actual
+    // joint angles, yours against the (mirrored) reference, at this moment.
+    this.timeline.push({
+      t, score: avg, worst: cmp.worst?.name || null,
+      limbs: Object.fromEntries(cmp.limbs.map((l) => [l.name, l.score])),
+      you: jointAngles(this.userPose, this.camAspect),
+      ref: jointAngles(this._ref, this.o.aspect),
+    });
 
     const j = judge(avg);
     this.tally[j.label]++;

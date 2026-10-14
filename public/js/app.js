@@ -474,10 +474,15 @@ async function finishBattle(id, meta, result, partyMode) {
 
   const steps = result.steps || [];
   const weakest = weakestStep(steps);
-  const drill = (s) => {
+  const drill = (s, speed) => {
     sessionStorage.setItem('shadow.studioRegion', JSON.stringify([s.start, s.end]));
+    if (speed) store.set('rate', speed);
     location.hash = `#/learn/${id}`;
   };
+  const coachPanel = steps.length && !partyMode ? h('section', { class: 'coach' },
+    h('div', { class: 'coach-head' }, h('span', { class: 'coach-badge' }, 'Coach'), h('h2', {}, 'Your next practice')),
+    h('p', { class: 'muted small coach-wait' }, 'Reviewing your run…'),
+  ) : null;
   const stepReport = steps.length > 1 ? h('section', { class: 'step-report' },
     h('h2', {}, 'Step by step'),
     weakest ? h('p', { class: 'muted small' },
@@ -498,6 +503,7 @@ async function finishBattle(id, meta, result, partyMode) {
   render(shell(h('div', { class: 'results' },
     h('p', { class: 'eyebrow' }, meta.title),
     card,
+    coachPanel,
     stepReport,
     board.length ? h('section', { class: 'board' },
       h('h2', {}, 'Best on this routine'),
@@ -510,6 +516,53 @@ async function finishBattle(id, meta, result, partyMode) {
       partyMode ? h('a', { class: 'btn ghost', href: '#/party' }, 'Party lobby') : null,
     ),
   )));
+
+  if (coachPanel) askCoach(id, meta, result, coachPanel, drill);
+}
+
+// What each coach tool call looks like in the "how it got here" trail.
+const TRACE_LABEL = {
+  get_step_report: () => 'Read your step-by-step report',
+  get_step_detail: (i) => `Looked closely at ${i.step}`,
+  get_past_attempts: () => 'Checked your past attempts',
+  lookup_technique: (i) => `Pulled cues for your ${i.joint} (${String(i.problem).replace('_', ' ')})`,
+  submit_plan: () => 'Wrote your plan',
+};
+
+async function askCoach(id, meta, result, panel, drill) {
+  const report = { title: meta.title, accuracy: result.accuracy, rank: result.rank, steps: result.steps };
+  let out;
+  try {
+    const r = await fetch(`/api/coach/${id}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    out = await r.json();
+  } catch (e) {
+    panel.querySelector('.coach-wait').textContent = `The coach is unavailable: ${e.message}`;
+    return;
+  }
+  const { plan, trace = [], source } = out;
+  panel.querySelector('.coach-wait').remove();
+  if (source === 'claude') panel.querySelector('.coach-badge').textContent = 'AI coach';
+  // h() skips nulls for us; append() would print them, so wrap the lot.
+  panel.append(h('div', {},
+    h('p', { class: 'coach-headline' }, plan.headline),
+    h('p', { class: 'muted' }, plan.why),
+    h('ul', { class: 'coach-cues' }, ...plan.cues.map((c) => h('li', {}, c))),
+    plan.progress ? h('p', { class: 'coach-progress' }, plan.progress) : null,
+    plan.focus ? h('button', { class: 'btn primary', onclick: () => drill(plan.focus, plan.speed) },
+      `Drill ${plan.focus.label} at ${plan.speed}× · ${plan.loops} loops`) : null,
+    trace.length ? h('details', { class: 'coach-trace' },
+      h('summary', {}, `How the coach got here · ${trace.length} steps`),
+      h('ol', {}, ...trace.map((t) => h('li', { class: t.ok ? '' : 'err' },
+        (TRACE_LABEL[t.tool] || (() => t.tool))(t.input), t.ok ? '' : ' (retried)'))),
+    ) : null,
+    h('p', { class: 'coach-source' }, source === 'claude'
+      ? `Coached by ${out.model || 'Claude'}`
+      : 'Offline coach (rule-based) — set ANTHROPIC_API_KEY for the AI coach'),
+  ));
 }
 
 // ---------- party ----------

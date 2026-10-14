@@ -11,7 +11,9 @@ import { readFile, writeFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import Anthropic from '@anthropic-ai/sdk';
 import { createTrending } from './trending.js';
+import { runCoach, offlinePlan, sanitizeReport, COACH_MODEL } from './coach.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA = path.join(__dirname, 'data');
@@ -20,7 +22,8 @@ const POSES = path.join(DATA, 'poses');
 const META = path.join(DATA, 'meta');
 const SCORES = path.join(DATA, 'scores.json');
 const TRENDING = path.join(DATA, 'trending.json');
-for (const d of [DATA, VIDEOS, POSES, META]) mkdirSync(d, { recursive: true });
+const COACH = path.join(DATA, 'coach');
+for (const d of [DATA, VIDEOS, POSES, META, COACH]) mkdirSync(d, { recursive: true });
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -237,10 +240,60 @@ app.post('/api/scores/:id', async (req, res) => {
   res.json(all[id].slice(0, 20));
 });
 
+// ---------- coach ----------
+// The browser posts the step report from a finished battle; the coach agent
+// reads it alongside this learner's past attempts on the same routine and
+// returns one practice plan. The attempt is then added to memory, so the next
+// run can say what improved.
+//
+// Credentials resolve the SDK's usual way (ANTHROPIC_API_KEY, or a profile from
+// `ant auth login`). With none, or on any API failure, the offline coach
+// answers instead and the response says so.
+let anthropic = null;
+const coachEnabled = () => process.env.SHADOW_COACH !== 'offline';
+function coachClient() {
+  if (!anthropic) anthropic = new Anthropic();
+  return anthropic;
+}
+const coachFile = (id) => path.join(COACH, `${id}.json`);
+async function readCoachMemory(id) {
+  try { return JSON.parse(await readFile(coachFile(id), 'utf8')); } catch { return []; }
+}
+
+app.post('/api/coach/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!YT_ID.test(id)) return res.status(400).json({ error: 'bad id' });
+  const report = sanitizeReport(req.body?.report);
+  if (!report.steps.length) return res.status(400).json({ error: 'no steps to coach' });
+
+  const history = await readCoachMemory(id);
+  let out;
+  if (coachEnabled()) {
+    try {
+      out = await runCoach({ client: coachClient(), report, history });
+    } catch (e) {
+      console.warn(`coach: falling back to offline plan — ${e.message}`);
+      out = { plan: offlinePlan(report, history), trace: [], source: 'offline', reason: e.message };
+    }
+  } else {
+    out = { plan: offlinePlan(report, history), trace: [], source: 'offline', reason: 'SHADOW_COACH=offline' };
+  }
+
+  history.push({
+    at: new Date().toISOString(), accuracy: report.accuracy,
+    steps: report.steps.map((s) => ({ label: s.label, accuracy: s.accuracy })),
+  });
+  await writeFile(coachFile(id), JSON.stringify(history.slice(-30), null, 2));
+  res.json(out);
+});
+
 // Spotify uses PKCE, so the browser needs only a client id — no secret ever
 // touches this server. Set SPOTIFY_CLIENT_ID, or let each user paste their own.
 app.get('/api/config', (_req, res) => {
-  res.json({ spotifyClientId: process.env.SPOTIFY_CLIENT_ID || null });
+  res.json({
+    spotifyClientId: process.env.SPOTIFY_CLIENT_ID || null,
+    coach: { enabled: coachEnabled(), model: COACH_MODEL },
+  });
 });
 
 const server = createServer(app);

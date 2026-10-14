@@ -297,25 +297,78 @@ export function comparePoses(refLm, userLm) {
   return { score, worst: limbScores[0], limbs: limbScores };
 }
 
+// ---------- joint angles ----------
+// Bone directions say a limb is wrong; joint angles say *how*: "your elbow is
+// at 165°, theirs is at 90°" is something a coach can turn into words. Interior
+// angles don't change sign under reflection, so they compare cleanly between a
+// mirrored reference and a learner. x is scaled by the frame aspect because
+// landmarks are normalised separately on each axis.
+const JOINTS = {
+  'left elbow': [LM.leftShoulder, LM.leftElbow, LM.leftWrist],
+  'right elbow': [LM.rightShoulder, LM.rightElbow, LM.rightWrist],
+  'left shoulder': [LM.leftHip, LM.leftShoulder, LM.leftElbow],
+  'right shoulder': [LM.rightHip, LM.rightShoulder, LM.rightElbow],
+  'left hip': [LM.leftShoulder, LM.leftHip, LM.leftKnee],
+  'right hip': [LM.rightShoulder, LM.rightHip, LM.rightKnee],
+  'left knee': [LM.leftHip, LM.leftKnee, LM.leftAnkle],
+  'right knee': [LM.rightHip, LM.rightKnee, LM.rightAnkle],
+};
+export const JOINT_NAMES = Object.keys(JOINTS);
+
+export function jointAngles(lm, aspect = 1) {
+  if (!lm) return null;
+  const out = {};
+  for (const [name, [a, b, c]] of Object.entries(JOINTS)) {
+    if (lm[a][3] < VISIBLE || lm[b][3] < VISIBLE || lm[c][3] < VISIBLE) { out[name] = null; continue; }
+    const ux = (lm[a][0] - lm[b][0]) * aspect, uy = lm[a][1] - lm[b][1];
+    const vx = (lm[c][0] - lm[b][0]) * aspect, vy = lm[c][1] - lm[b][1];
+    const nu = Math.hypot(ux, uy), nv = Math.hypot(vx, vy);
+    if (!nu || !nv) { out[name] = null; continue; }
+    const cos = Math.max(-1, Math.min(1, (ux * vx + uy * vy) / (nu * nv)));
+    out[name] = Math.round(Math.acos(cos) * 180 / Math.PI);
+  }
+  return out;
+}
+
 // ---------- per-step report ----------
 // A battle judges you roughly twice a second. Bucketing those judgements by the
 // routine's own steps turns one overall percentage into "step 3 is the one you
 // can't do yet, and it's your left arm" — something you can actually go and fix.
 //
-// samples: [{ t, score, worst }] where worst is the weakest limb's name.
+// samples: [{ t, score, worst, limbs?, you?, ref? }] — worst is the weakest
+// limb's name, limbs maps limb name → 0..1, you/ref map joint name → degrees.
 // A step nobody was judged in (you were out of frame, or it was outside the
 // region) reports accuracy null rather than a made-up zero.
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
 export function scoreSteps(steps, samples) {
   return steps.map((s) => {
     const inStep = samples.filter((x) => x.t >= s.start && x.t < s.end);
-    if (!inStep.length) return { ...s, accuracy: null, worst: null, judged: 0 };
-    const accuracy = Math.round(inStep.reduce((a, x) => a + x.score, 0) / inStep.length);
+    if (!inStep.length) return { ...s, accuracy: null, worst: null, judged: 0, limbs: {}, joints: {} };
+    const accuracy = Math.round(mean(inStep.map((x) => x.score)));
     // The limb that was weakest most often across the step, not in one frame.
     const counts = new Map();
     for (const x of inStep) if (x.worst) counts.set(x.worst, (counts.get(x.worst) || 0) + 1);
     let worst = null, most = 0;
     for (const [name, n] of counts) if (n > most) { worst = name; most = n; }
-    return { ...s, accuracy, worst, judged: inStep.length };
+
+    const limbs = {};
+    const limbNames = new Set(inStep.flatMap((x) => Object.keys(x.limbs || {})));
+    for (const n of limbNames) {
+      const m = mean(inStep.map((x) => x.limbs?.[n]).filter((v) => v != null));
+      if (m != null) limbs[n] = Math.round(m * 100);
+    }
+    // Joint angles only where both of you were visible in the same sample, so
+    // the two averages describe the same moments.
+    const joints = {};
+    for (const n of JOINT_NAMES) {
+      const pairs = inStep.filter((x) => x.you?.[n] != null && x.ref?.[n] != null);
+      if (!pairs.length) continue;
+      const you = Math.round(mean(pairs.map((x) => x.you[n])));
+      const ref = Math.round(mean(pairs.map((x) => x.ref[n])));
+      joints[n] = { you, ref, diff: you - ref };
+    }
+    return { ...s, accuracy, worst, judged: inStep.length, limbs, joints };
   });
 }
 
